@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#2196F3">
+    <meta name="description" content="Simple PWA app with file writing capabilities">
+    <title>PWA File Writer</title>
+    <link rel="manifest" href="manifest.json">
+    <link rel="icon" type="image/png" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect fill='%232196F3' width='192' height='192'/><text x='50%' y='50%' font-size='100' fill='white' text-anchor='middle' dominant-baseline='central'>📝</text></svg>">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>📝 PWA File Writer</h1>
+            <div class="status-badge" id="statusBadge">Online</div>
+        </header>
+
+        <main>
+            <section class="editor-section">
+                <div class="input-group">
+                    <label for="filename">Filename:</label>
+                    <input type="text" id="filename" placeholder="Enter filename..." value="document.txt">
+                </div>
+
+                <div class="input-group">
+                    <label for="content">Content:</label>
+                    <textarea id="content" placeholder="Enter your content here..." rows="10"></textarea>
+                </div>
+
+                <div class="button-group">
+                    <button id="saveBtn" class="btn btn-primary">💾 Save to File</button>
+                    <button id="loadBtn" class="btn btn-secondary">📂 Load File</button>
+                    <button id="clearBtn" class="btn btn-danger">🗑️ Clear</button>
+                </div>
+            </section>
+
+            <section class="info-section">
+                <h2>Recent Files</h2>
+                <ul id="filesList" class="files-list"></ul>
+            </section>
+
+            <section class="status-section">
+                <h3>Status</h3>
+                <p id="statusMessage" class="status-message">Ready to work</p>
+            </section>
+        </main>
+
+        <footer>
+            <p>Works offline | Powered by PWA + File System Access API</p>
+        </footer>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
