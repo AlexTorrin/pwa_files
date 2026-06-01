@@ -1,8 +1,8 @@
-// PWA App - File Writing with Offline Support
+// PWA App - File Writing with Offline Support (Direct Save)
 
 class PWAFileApp {
     constructor() {
-        this.fileHandles = {};
+        this.db = null;
         this.recentFiles = [];
         this.init();
     }
@@ -12,6 +12,7 @@ class PWAFileApp {
         this.setupEventListeners();
         this.setupServiceWorker();
         this.setupOnlineOfflineListeners();
+        await this.initDatabase();
         this.loadRecentFiles();
         this.updateStatus('App loaded successfully');
     }
@@ -56,6 +57,32 @@ class PWAFileApp {
         this.updateStatus('Connection lost - working offline');
     }
 
+    // Initialize IndexedDB
+    async initDatabase() {
+        return new Promise((resolve, reject) => {
+            const request = indexedDB.open('PWAFileWriter', 1);
+
+            request.onerror = () => {
+                console.error('Database error:', request.error);
+                reject(request.error);
+            };
+
+            request.onsuccess = () => {
+                this.db = request.result;
+                console.log('Database initialized');
+                resolve();
+            };
+
+            request.onupgradeneeded = (event) => {
+                const db = event.target.result;
+                if (!db.objectStoreNames.contains('files')) {
+                    db.createObjectStore('files', { keyPath: 'name' });
+                    console.log('Object store created');
+                }
+            };
+        });
+    }
+
     async saveFile() {
         const filename = this.filenameInput.value.trim();
         const content = this.contentArea.value;
@@ -71,19 +98,45 @@ class PWAFileApp {
         }
 
         try {
-            // Check if File System Access API is available
+            // Save to IndexedDB
+            await this.saveToIndexedDB(filename, content);
+
+            // Also try to save locally if File System Access API available
             if ('showSaveFilePicker' in window) {
-                await this.saveFileWithAPI(filename, content);
-            } else {
-                this.saveFileFallback(filename, content);
+                await this.saveToFileSystem(filename, content);
             }
+
+            this.addToRecentFiles(filename, content.length);
+            this.updateStatus(`✓ File saved: ${filename}`);
         } catch (error) {
             console.error('Error saving file:', error);
             this.updateStatus(`❌ Error: ${error.message}`);
         }
     }
 
-    async saveFileWithAPI(filename, content) {
+    async saveToIndexedDB(filename, content) {
+        return new Promise((resolve, reject) => {
+            const transaction = this.db.transaction(['files'], 'readwrite');
+            const store = transaction.objectStore('files');
+
+            const fileData = {
+                name: filename,
+                content: content,
+                size: content.length,
+                timestamp: Date.now()
+            };
+
+            const request = store.put(fileData);
+
+            request.onerror = () => reject(request.error);
+            request.onsuccess = () => {
+                console.log('File saved to IndexedDB');
+                resolve();
+            };
+        });
+    }
+
+    async saveToFileSystem(filename, content) {
         try {
             const handle = await window.showSaveFilePicker({
                 suggestedName: filename,
@@ -103,76 +156,51 @@ class PWAFileApp {
             await writable.write(content);
             await writable.close();
 
-            this.addToRecentFiles(filename, content.length);
-            this.updateStatus(`✓ File saved: ${filename}`);
-            console.log('File saved with File System Access API');
+            console.log('File saved to file system');
         } catch (error) {
-            if (error.name === 'AbortError') {
-                this.updateStatus('File save cancelled');
-            } else {
+            if (error.name !== 'AbortError') {
                 throw error;
             }
+            // User cancelled the picker - that's OK
         }
-    }
-
-    saveFileFallback(filename, content) {
-        // Fallback: Download file using Blob
-        const blob = new Blob([content], { type: 'text/plain' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-
-        this.addToRecentFiles(filename, content.length);
-        this.updateStatus(`✓ File downloaded: ${filename}`);
-        console.log('File saved with download fallback');
     }
 
     async loadFile() {
         try {
+            // Try file picker first
             if ('showOpenFilePicker' in window) {
-                await this.loadFileWithAPI();
+                await this.loadFromFileSystem();
             } else {
                 this.loadFileFallback();
             }
         } catch (error) {
             console.error('Error loading file:', error);
-            this.updateStatus(`❌ Error: ${error.message}`);
+            if (error.name !== 'AbortError') {
+                this.updateStatus(`❌ Error: ${error.message}`);
+            }
         }
     }
 
-    async loadFileWithAPI() {
-        try {
-            const [handle] = await window.showOpenFilePicker({
-                types: [
-                    {
-                        description: 'Text Files',
-                        accept: { 'text/plain': ['.txt'] }
-                    },
-                    {
-                        description: 'All Files',
-                        accept: { '*/*': [] }
-                    }
-                ]
-            });
+    async loadFromFileSystem() {
+        const [handle] = await window.showOpenFilePicker({
+            types: [
+                {
+                    description: 'Text Files',
+                    accept: { 'text/plain': ['.txt'] }
+                },
+                {
+                    description: 'All Files',
+                    accept: { '*/*': [] }
+                }
+            ]
+        });
 
-            const file = await handle.getFile();
-            const content = await file.text();
+        const file = await handle.getFile();
+        const content = await file.text();
 
-            this.filenameInput.value = file.name;
-            this.contentArea.value = content;
-            this.updateStatus(`✓ File loaded: ${file.name}`);
-        } catch (error) {
-            if (error.name === 'AbortError') {
-                this.updateStatus('File load cancelled');
-            } else {
-                throw error;
-            }
-        }
+        this.filenameInput.value = file.name;
+        this.contentArea.value = content;
+        this.updateStatus(`✓ File loaded: ${file.name}`);
     }
 
     loadFileFallback() {
@@ -206,7 +234,7 @@ class PWAFileApp {
     addToRecentFiles(filename, size) {
         const file = { name: filename, size: size, timestamp: Date.now() };
         this.recentFiles.unshift(file);
-        this.recentFiles = this.recentFiles.slice(0, 5); // Keep last 5 files
+        this.recentFiles = this.recentFiles.slice(0, 5);
         this.saveRecentFiles();
         this.renderRecentFiles();
     }
@@ -246,11 +274,35 @@ class PWAFileApp {
                     <span class="file-item-size">${this.formatFileSize(file.size)}</span>
                 </span>
             `;
-            li.addEventListener('click', () => {
-                this.filenameInput.value = file.name;
-                this.updateStatus(`Selected: ${file.name}`);
-            });
+            li.addEventListener('click', () => this.loadFromStorage(file.name));
             this.filesList.appendChild(li);
+        });
+    }
+
+    async loadFromStorage(filename) {
+        try {
+            const content = await this.getFromIndexedDB(filename);
+            if (content) {
+                this.filenameInput.value = filename;
+                this.contentArea.value = content;
+                this.updateStatus(`✓ Loaded from storage: ${filename}`);
+            }
+        } catch (error) {
+            console.error('Error loading from storage:', error);
+            this.updateStatus(`❌ Error loading file`);
+        }
+    }
+
+    async getFromIndexedDB(filename) {
+        return new Promise((resolve, reject) => {
+            const transaction = this.db.transaction(['files'], 'readonly');
+            const store = transaction.objectStore('files');
+            const request = store.get(filename);
+
+            request.onerror = () => reject(request.error);
+            request.onsuccess = () => {
+                resolve(request.result ? request.result.content : null);
+            };
         });
     }
 
